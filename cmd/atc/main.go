@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/t01buddy/agent-task-center/internal/config"
+	"github.com/t01buddy/agent-task-center/internal/dashboard"
+	"github.com/t01buddy/agent-task-center/internal/db"
 )
 
 const version = "0.1.0"
@@ -36,11 +38,19 @@ func main() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
+	conn, err := db.OpenDefault(cfg.DBPath)
+	if err != nil {
+		slog.Error("open db", "err", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	})
+	mux.Handle("/logs", dashboard.LogsHandler(conn))
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,
