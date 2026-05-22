@@ -1,5 +1,36 @@
-*.db
+# Binaries
 /atc
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Go build artifacts
 *.test
+*.out
+/vendor/
+
+# OS noise
 .DS_Store
-atc.toml
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
