@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/t01buddy/agent-task-center/internal/config"
+	"github.com/t01buddy/agent-task-center/internal/db"
+	"github.com/t01buddy/agent-task-center/internal/queue"
 )
 
 const version = "0.1.0"
@@ -36,6 +38,19 @@ func main() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
+	conn, err := db.OpenDefault(cfg.DBPath)
+	if err != nil {
+		slog.Error("open db", "err", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start lease-expiry and stale-agent detection loop.
+	go queue.Expiry(ctx, conn, cfg.ExpiryIntervalS)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -59,11 +74,13 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	slog.Info("shutting down", "drain_timeout_s", cfg.DrainTimeoutS)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.DrainTimeoutS)*time.Second)
-	defer cancel()
+	cancel() // stop expiry goroutine
 
-	if err := srv.Shutdown(ctx); err != nil {
+	slog.Info("shutting down", "drain_timeout_s", cfg.DrainTimeoutS)
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Duration(cfg.DrainTimeoutS)*time.Second)
+	defer shutCancel()
+
+	if err := srv.Shutdown(shutCtx); err != nil {
 		slog.Error("shutdown error", "err", err)
 		os.Exit(1)
 	}
