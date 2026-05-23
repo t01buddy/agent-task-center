@@ -51,7 +51,7 @@ func LogsHandler(db *sql.DB) http.HandlerFunc {
 		case http.MethodGet:
 			handleQuery(w, r, db)
 		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		}
 	}
 }
@@ -59,7 +59,7 @@ func LogsHandler(db *sql.DB) http.HandlerFunc {
 func handleIngest(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req ingestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
@@ -167,14 +167,14 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	var total int
 	if err := db.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		http.Error(w, "count error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
 	queryArgs := append(args, limit, offset)
 	rows, err := db.Query(baseQuery, queryArgs...)
 	if err != nil {
-		http.Error(w, "query error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	defer rows.Close()
@@ -183,13 +183,13 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	for rows.Next() {
 		var e LogEntry
 		if err := rows.Scan(&e.ID, &e.TaskID, &e.AttemptID, &e.WorkerID, &e.Level, &e.Message, &e.CreatedAt); err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
-		http.Error(w, "rows error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	if entries == nil {

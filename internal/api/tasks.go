@@ -340,7 +340,7 @@ func handleUpdateTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id str
 	var status string
 	err := db.QueryRow("SELECT status FROM tasks WHERE id = ?", id).Scan(&status)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "not found")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
@@ -431,7 +431,7 @@ func handleCancelTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id str
 	var status string
 	err := db.QueryRow("SELECT status FROM tasks WHERE id = ?", id).Scan(&status)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "not found")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
@@ -611,7 +611,7 @@ func handleTaskHeartbeat(db *sql.DB, w http.ResponseWriter, r *http.Request, id 
 		WHERE t.id = ? AND ta.ended_at IS NULL
 		ORDER BY ta.fencing_token DESC LIMIT 1`, id).Scan(&visTimeoutS, &attemptID, &dbToken)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "not found or not leased")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
@@ -654,7 +654,7 @@ func handleCompleteTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id s
 
 	attemptID, err := validateFencingToken(db, id, req.FencingToken)
 	if err == errNotFound {
-		writeError(w, http.StatusNotFound, "not found or not leased")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err == errStaleToken {
@@ -707,7 +707,7 @@ func handleFailTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id strin
 
 	attemptID, err := validateFencingToken(db, id, req.FencingToken)
 	if err == errNotFound {
-		writeError(w, http.StatusNotFound, "not found or not leased")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err == errStaleToken {

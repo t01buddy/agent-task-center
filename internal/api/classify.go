@@ -34,18 +34,18 @@ type ClassifyResponse struct {
 func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 
 		var req ClassifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		req.Title = strings.TrimSpace(req.Title)
 		if req.Title == "" {
-			http.Error(w, `{"error":"title required"}`, http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "title required")
 			return
 		}
 
@@ -59,7 +59,7 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 		// Look up existing task by title (most recent first)
 		existing, err := findTaskByTitle(db, req.Title)
 		if err != nil && err != sql.ErrNoRows {
-			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 
@@ -87,7 +87,7 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 			// Load single known workflow
 			def, err := loadWorkflowDef(db, workflowName)
 			if err != nil {
-				http.Error(w, "workflow not found: "+workflowName, http.StatusUnprocessableEntity)
+				writeError(w, http.StatusUnprocessableEntity, "not_found")
 				return
 			}
 			workflowDefs = []ai.WorkflowDef{{Name: workflowName, Definition: def}}
@@ -95,11 +95,11 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 			// Load all workflows for detection
 			workflowDefs, err = loadAllWorkflowDefs(db)
 			if err != nil {
-				http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+				writeError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			if len(workflowDefs) == 0 {
-				http.Error(w, `{"error":"no workflows defined; create one via POST /api/workflows"}`, http.StatusUnprocessableEntity)
+				writeError(w, http.StatusUnprocessableEntity, "no_workflows")
 				return
 			}
 		}
@@ -122,7 +122,7 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 			CurrentStatus: currentStatus,
 		})
 		if err != nil {
-			http.Error(w, "classify error: "+err.Error(), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "classify_error")
 			return
 		}
 
@@ -150,7 +150,7 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 				nullStr(result.Domain), result.Priority, now, existing.ID,
 			)
 			if err != nil {
-				http.Error(w, "db update error: "+err.Error(), http.StatusInternalServerError)
+				writeError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = AppendEvent(db, existing.ID, "", "", "reclassified", strPtr(result.Reasoning))
@@ -171,7 +171,7 @@ func ClassifyHandler(db *sql.DB, provider ai.Provider) http.HandlerFunc {
 				visibilityTimeoutS, maxAttempts, retryBackoffS, now, now,
 			)
 			if err != nil {
-				http.Error(w, "db insert error: "+err.Error(), http.StatusInternalServerError)
+				writeError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = AppendEvent(db, id, "", "", "classified", strPtr(result.Reasoning))

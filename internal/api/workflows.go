@@ -28,7 +28,6 @@ type Workflow struct {
 //	DELETE /api/workflows/{name}   — delete
 func WorkflowsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Trim leading prefix; path is e.g. "" or "/bug-fix"
 		name := strings.TrimPrefix(r.URL.Path, "/api/workflows")
 		name = strings.TrimPrefix(name, "/")
 
@@ -39,7 +38,7 @@ func WorkflowsHandler(db *sql.DB) http.HandlerFunc {
 			case http.MethodGet:
 				listWorkflows(w, r, db)
 			default:
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			}
 			return
 		}
@@ -52,7 +51,7 @@ func WorkflowsHandler(db *sql.DB) http.HandlerFunc {
 		case http.MethodDelete:
 			deleteWorkflow(w, r, db, name)
 		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		}
 	}
 }
@@ -68,15 +67,15 @@ type workflowRequest struct {
 func createWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req workflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
 	if strings.TrimSpace(req.Definition) == "" {
-		http.Error(w, `{"error":"definition required"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "definition required")
 		return
 	}
 
@@ -101,10 +100,10 @@ func createWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
-			http.Error(w, `{"error":"workflow already exists"}`, http.StatusConflict)
+			writeError(w, http.StatusConflict, "conflict")
 			return
 		}
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
@@ -117,9 +116,7 @@ func createWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"workflow": wf})
+	writeJSON(w, http.StatusCreated, map[string]any{"workflow": wf})
 }
 
 func listWorkflows(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -128,7 +125,7 @@ func listWorkflows(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		 FROM workflows ORDER BY name ASC`,
 	)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	defer rows.Close()
@@ -137,21 +134,20 @@ func listWorkflows(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	for rows.Next() {
 		var wf Workflow
 		if err := rows.Scan(&wf.Name, &wf.Definition, &wf.DefaultVisibilityTimeout, &wf.DefaultMaxAttempts, &wf.DefaultRetryBackoff, &wf.CreatedAt, &wf.UpdatedAt); err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		workflows = append(workflows, wf)
 	}
 	if err := rows.Err(); err != nil {
-		http.Error(w, "rows error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	if workflows == nil {
 		workflows = []Workflow{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"workflows": workflows})
+	writeJSON(w, http.StatusOK, map[string]any{"workflows": workflows})
 }
 
 func getWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name string) {
@@ -161,21 +157,20 @@ func getWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name string
 		 FROM workflows WHERE name = ?`, name,
 	).Scan(&wf.Name, &wf.Definition, &wf.DefaultVisibilityTimeout, &wf.DefaultMaxAttempts, &wf.DefaultRetryBackoff, &wf.CreatedAt, &wf.UpdatedAt)
 	if err == sql.ErrNoRows {
-		http.NotFound(w, r)
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"workflow": wf})
+	writeJSON(w, http.StatusOK, map[string]any{"workflow": wf})
 }
 
 func updateWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name string) {
 	var req workflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
@@ -185,11 +180,11 @@ func updateWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name str
 		 FROM workflows WHERE name = ?`, name,
 	).Scan(&current.Name, &current.Definition, &current.DefaultVisibilityTimeout, &current.DefaultMaxAttempts, &current.DefaultRetryBackoff, &current.CreatedAt, &current.UpdatedAt)
 	if err == sql.ErrNoRows {
-		http.NotFound(w, r)
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
@@ -213,23 +208,22 @@ func updateWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name str
 		current.Definition, current.DefaultVisibilityTimeout, current.DefaultMaxAttempts, current.DefaultRetryBackoff, current.UpdatedAt, name,
 	)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"workflow": current})
+	writeJSON(w, http.StatusOK, map[string]any{"workflow": current})
 }
 
 func deleteWorkflow(w http.ResponseWriter, r *http.Request, db *sql.DB, name string) {
 	res, err := db.Exec(`DELETE FROM workflows WHERE name = ?`, name)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		http.NotFound(w, r)
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

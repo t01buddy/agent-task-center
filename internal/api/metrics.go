@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -42,19 +41,18 @@ type MetricsResponse struct {
 func MetricsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 
 		now := time.Now().UTC()
 		resp, err := collectMetrics(db, now)
 		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
