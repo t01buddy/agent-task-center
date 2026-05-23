@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/t01buddy/agent-task-center/internal/api"
 	"github.com/t01buddy/agent-task-center/internal/config"
 	"github.com/t01buddy/agent-task-center/internal/dashboard"
 	"github.com/t01buddy/agent-task-center/internal/db"
@@ -51,6 +52,7 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 	mux.Handle("/logs", dashboard.LogsHandler(conn))
+	mux.Handle("/api/metrics", api.MetricsHandler(conn))
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,
