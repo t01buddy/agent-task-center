@@ -9,8 +9,7 @@ import (
 
 var expectedTables = []string{
 	"workspaces",
-	"agents",
-	"task_types",
+	"workflows",
 	"tasks",
 	"task_attempts",
 	"task_events",

@@ -103,7 +103,7 @@ tr:hover{background:#f9f9f9}
       hx-push-url="true"
       hx-swap="outerHTML">
   <label>Task ID<input type="text" name="task_id" value="{{.Filters.TaskID}}" placeholder="task-…"></label>
-  <label>Agent ID<input type="text" name="agent_id" value="{{.Filters.AgentID}}" placeholder="agent-…"></label>
+  <label>Worker ID<input type="text" name="worker_id" value="{{.Filters.WorkerID}}" placeholder="worker-…"></label>
   <label>Level
     <select name="level">
       {{range .LevelOptions}}
@@ -123,7 +123,7 @@ tr:hover{background:#f9f9f9}
       <tr>
         <th>Timestamp</th>
         <th>Task ID</th>
-        <th>Agent</th>
+        <th>Worker</th>
         <th>Level</th>
         <th>Message</th>
       </tr>
@@ -133,7 +133,7 @@ tr:hover{background:#f9f9f9}
       <tr>
         <td class="ts" title="{{.CreatedAt}}">{{reltime .CreatedAt}}</td>
         <td><a class="task-link" href="/tasks?id={{.TaskID}}">{{truncate .TaskID 12}}</a></td>
-        <td>{{.AgentID}}</td>
+        <td>{{.WorkerID}}</td>
         <td><span class="{{levelClass .Level}}">{{.Level}}</span></td>
         <td>{{.Message}}</td>
       </tr>
@@ -162,7 +162,7 @@ tr:hover{background:#f9f9f9}
     {{end}}
   </div>
   {{else}}
-  <div class="empty">No logs found. Adjust filters or wait for agents to produce logs.</div>
+  <div class="empty">No logs found. Adjust filters or wait for workers to produce logs.</div>
   {{end}}
 </div>
 </body>
@@ -173,7 +173,7 @@ tr:hover{background:#f9f9f9}
 type LogEntry struct {
 	ID        string
 	TaskID    string
-	AgentID   string
+	WorkerID  string
 	Level     string
 	Message   string
 	CreatedAt string
@@ -181,11 +181,11 @@ type LogEntry struct {
 
 // LogFilters holds the parsed query params for /logs.
 type LogFilters struct {
-	TaskID  string
-	AgentID string
-	Level   string
-	Since   string
-	Until   string
+	TaskID   string
+	WorkerID string
+	Level    string
+	Since    string
+	Until    string
 }
 
 // LogsPageData is passed to the template.
@@ -205,8 +205,8 @@ func LogsHandler(db *sql.DB) http.HandlerFunc {
 		q := r.URL.Query()
 
 		filters := LogFilters{
-			TaskID:  strings.TrimSpace(q.Get("task_id")),
-			AgentID: strings.TrimSpace(q.Get("agent_id")),
+			TaskID:   strings.TrimSpace(q.Get("task_id")),
+			WorkerID: strings.TrimSpace(q.Get("worker_id")),
 			Level:   q.Get("level"),
 			Since:   q.Get("since"),
 			Until:   q.Get("until"),
@@ -257,9 +257,9 @@ func queryLogs(db *sql.DB, f LogFilters, offset, limit int) ([]LogEntry, error) 
 		conditions = append(conditions, "task_id LIKE ?")
 		args = append(args, f.TaskID+"%")
 	}
-	if f.AgentID != "" {
-		conditions = append(conditions, "agent_id LIKE ?")
-		args = append(args, f.AgentID+"%")
+	if f.WorkerID != "" {
+		conditions = append(conditions, "worker_id LIKE ?")
+		args = append(args, f.WorkerID+"%")
 	}
 	if f.Level != "" && f.Level != "all" {
 		conditions = append(conditions, "level = ?")
@@ -280,7 +280,7 @@ func queryLogs(db *sql.DB, f LogFilters, offset, limit int) ([]LogEntry, error) 
 		}
 	}
 
-	query := "SELECT id, task_id, COALESCE(agent_id,''), level, message, created_at FROM task_logs"
+	query := "SELECT id, task_id, COALESCE(worker_id,''), level, message, created_at FROM task_logs"
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -296,7 +296,7 @@ func queryLogs(db *sql.DB, f LogFilters, offset, limit int) ([]LogEntry, error) 
 	var entries []LogEntry
 	for rows.Next() {
 		var e LogEntry
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentID, &e.Level, &e.Message, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.WorkerID, &e.Level, &e.Message, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

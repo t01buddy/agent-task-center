@@ -7,7 +7,7 @@
 
 ## One-liner
 
-A local-first task queue and operations dashboard where multiple AI agents can claim work, respect timeouts, update status, and leave auditable logs through a simple HTTP API.
+A local-first AI-powered task center that classifies incoming tickets (GitHub issues, Jira, Linear) into the right workflow and step, queues tasks for workers to claim, and provides an auditable operations dashboard — all through a simple HTTP API.
 
 ---
 
@@ -16,11 +16,11 @@ A local-first task queue and operations dashboard where multiple AI agents can c
 Power users now run several agents in parallel: coding agents, research agents, review agents, and business-ops agents. Coordinating them without dedicated infrastructure means:
 
 - no shared view of available work,
-- no atomic claim mechanism — two agents pick the same task,
-- no visibility into whether an agent is still alive,
+- no atomic claim mechanism — two workers pick the same task,
 - no timeout or retry logic when a worker disappears,
 - no auditable log of what happened during execution,
-- no way to filter tasks by worker type or project.
+- no intelligence to route incoming tickets to the right workflow and step,
+- no way to filter tasks by workflow, step, or worker.
 
 Human-facing project management tools (Linear, GitHub Issues, Jira) are optimised for people, not for autonomous workers that need atomic leasing, heartbeat, idempotent status updates, and machine-readable filters. Full orchestration frameworks (Temporal, LangGraph, CrewAI) can coordinate workflows inside an application, but they do not provide a universal local inbox where independently launched agents can discover and coordinate external tasks.
 
@@ -38,15 +38,17 @@ Human-facing project management tools (Linear, GitHub Issues, Jira) are optimise
 
 ## Product Vision
 
-> "A tiny local task center where your coding and business agents pick up work and report back."
+> "An AI-powered local command center that classifies incoming tickets into the right workflow step and queues them for workers to pick up."
 
 Agent Task Center owns a narrow boundary:
 
-1. Agents ask for eligible tasks.
-2. The system atomically leases one task to one agent.
-3. Task-specific timeout rules protect against hung agents.
-4. Agents report progress, logs, result metadata, and completion.
-5. Humans and supervising agents inspect metrics, task state, and logs from a small read-oriented dashboard.
+1. External tickets (GitHub issues, Jira, Linear) arrive via `POST /api/classify`.
+2. An LLM reads the workflow definition and decides the next step.
+3. The task is queued with `workflow_name` + `step`.
+4. Workers poll for tasks matching their workflow + step, atomically leasing one at a time.
+5. Task-specific timeout rules protect against hung workers.
+6. Workers report progress, logs, result metadata, and completion.
+7. Humans and supervising workers inspect metrics, task state, and logs from a small read-oriented dashboard.
 
 The differentiation is intentional simplicity: one local service, one SQLite file, a tiny HTTP API, and a dashboard that can be understood in minutes.
 
@@ -67,14 +69,15 @@ The differentiation is intentional simplicity: one local service, one SQLite fil
 
 - Distributed cluster coordination or multi-node deployment.
 - Cloud-hosted multi-tenant SaaS.
-- Full workflow DAG engine or workflow definition language.
+- Full DAG workflow engine with conditional branching or parallel steps.
 - Replacing Linear, GitHub Issues, or any human project management system.
 - Deep IDE integration.
 - Role-based access control or authentication.
-- Launching agents directly from the product.
+- Launching workers directly from the product.
 - Human-first task editing workflows in the dashboard.
-- Push/webhook delivery to agents.
+- Push/webhook delivery to workers.
 - SSE live-stream updates in the dashboard.
+- Worker/agent registration (workers are free strings — no sign-up required).
 
 ---
 

@@ -18,6 +18,7 @@ Agent Task Center is a single local HTTP service with a minimal frontend and a S
 | Database | **SQLite (WAL mode)** | Zero server dependencies, file-based, proven for local-first services, good concurrent read performance in WAL mode. |
 | SQLite driver | **`modernc.org/sqlite`** | Pure-Go SQLite — no CGO, simplifies cross-compilation and static binaries. |
 | Migrations | **Embedded SQL migration files** | Applied on startup, versioned, idempotent. No external migration tool required. |
+| AI Classification | **OpenAI-compatible API (raw HTTP) or Codex CLI** | Workflow + step detection from ticket title/context; provider-agnostic via `internal/ai.Provider` interface. |
 
 ---
 
@@ -84,11 +85,13 @@ agent-task-center/
 ├── cmd/
 │   └── atc/          # main entry point
 ├── internal/
-│   ├── api/          # HTTP handlers
-│   ├── db/           # SQLite migrations and queries
-│   ├── model/        # domain types and state machine
-│   ├── queue/        # lease, heartbeat, expire logic
-│   └── dashboard/    # Templ page components
+│   ├── ai/           # LLM provider abstraction (OpenAI, Codex CLI) + classify logic
+│   ├── api/          # HTTP handlers (tasks, workflows, classify, logs, metrics, events)
+│   ├── config/       # environment-based config
+│   ├── db/           # SQLite open + migration runner
+│   ├── model/        # domain types
+│   ├── queue/        # lease expiry background loop
+│   └── dashboard/    # server-rendered HTML dashboard
 ├── migrations/       # numbered SQL migration files
 ├── examples/         # worker example scripts
 └── prd/              # this document and siblings

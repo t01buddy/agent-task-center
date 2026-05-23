@@ -138,24 +138,3 @@ func TestExpiry_RetryAfterSetOnRequeue(t *testing.T) {
 	}
 }
 
-func TestExpiry_StaleAgentDetection(t *testing.T) {
-	conn := openTestDB(t)
-	// Insert an agent with an old heartbeat
-	staleTime := time.Now().UTC().Add(-120 * time.Second).Format(time.RFC3339)
-	now := time.Now().UTC().Format(time.RFC3339)
-	conn.Exec(`INSERT INTO agents (id, name, runtime, domain, status, last_heartbeat_at, registered_at)
-	           VALUES ('agent-stale', 'stale-bot', 'go', 'coding', 'active', ?, ?)`, staleTime, now)
-
-	cfg := queue.ExpiryConfig{IntervalS: 1}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	go queue.RunExpiryLoop(ctx, conn, cfg)
-	time.Sleep(2 * time.Second)
-
-	var status string
-	conn.QueryRow(`SELECT status FROM agents WHERE id='agent-stale'`).Scan(&status)
-	if status != "stale" {
-		t.Errorf("expected agent status=stale, got %q", status)
-	}
-}

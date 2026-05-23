@@ -15,12 +15,6 @@ var metricsTemplates = template.Must(template.New("metrics").Funcs(template.Func
 {{define "metrics-body"}}
 <div class="content">
   <div class="card">
-    <h2>Agents</h2>
-    <div class="metric-row"><span class="metric-label">Active</span><span class="metric-value">{{.Agents.Active}}</span></div>
-    <div class="metric-row"><span class="metric-label">Stale</span><span class="metric-value{{if gt .Agents.Stale 0}} stale{{end}}">{{.Agents.Stale}}</span></div>
-    <div class="metric-row"><span class="metric-label">Offline</span><span class="metric-value">{{.Agents.Offline}}</span></div>
-  </div>
-  <div class="card">
     <h2>Tasks by Status</h2>
     <div class="metric-row"><span class="metric-label">Queued</span><span class="metric-value">{{.Tasks.Queued}}</span></div>
     <div class="metric-row"><span class="metric-label">Leased</span><span class="metric-value">{{.Tasks.Leased}}</span></div>
@@ -30,16 +24,16 @@ var metricsTemplates = template.Must(template.New("metrics").Funcs(template.Func
     <div class="metric-row"><span class="metric-label">Timed out</span><span class="metric-value">{{.Tasks.TimedOut}}</span></div>
     <div class="metric-row"><span class="metric-label">Cancelled</span><span class="metric-value">{{.Tasks.Cancelled}}</span></div>
   </div>
-  <div class="card card-full">
+  <div class="card">
     <h2>Rates (last 1 h / 10 min)</h2>
     <div class="metric-row"><span class="metric-label">Retry rate</span><span class="metric-value">{{pct .Rates.RetryRate1h}}</span></div>
     <div class="metric-row"><span class="metric-label">Throughput</span><span class="metric-value">{{fmtf .Rates.ThroughputPerMin10m}} tasks/min</span></div>
   </div>
   <div class="card card-full">
-    <h2>Duration by Task Type (avg, last 1 h)</h2>
-    {{if .DurationsByType}}
-    {{range .DurationsByType}}
-    <div class="metric-row"><span class="metric-label">{{.TaskType}}</span><span class="metric-value">{{fmtf .AvgS}} s</span></div>
+    <h2>Duration by Workflow / Step (avg, last 1 h)</h2>
+    {{if .DurationsByStep}}
+    {{range .DurationsByStep}}
+    <div class="metric-row"><span class="metric-label">{{.WorkflowName}} / {{.Step}}</span><span class="metric-value">{{fmtf .AvgS}} s</span></div>
     {{end}}
     {{else}}
     <div class="empty">No completed tasks in the last hour.</div>
@@ -71,7 +65,6 @@ nav a:hover,nav a.active{color:#fff;background:#333;border-radius:3px}
 .metric-row:last-child{border-bottom:none}
 .metric-label{color:#555}
 .metric-value{font-weight:bold}
-.stale{color:#d97706}
 .empty{color:#999;font-style:italic;padding:8px 0}
 </style>
 </head>
@@ -95,13 +88,6 @@ nav a:hover,nav a.active{color:#fff;background:#333;border-radius:3px}
 {{end}}
 `))
 
-// MetricsAgents mirrors api.MetricsAgents without import cycle.
-type MetricsAgents struct {
-	Active  int
-	Stale   int
-	Offline int
-}
-
 // MetricsTasks mirrors api.MetricsTasks without import cycle.
 type MetricsTasks struct {
 	Queued    int
@@ -119,45 +105,26 @@ type MetricsRates struct {
 	ThroughputPerMin10m float64
 }
 
-// MetricsDuration holds one task-type average.
-type MetricsDuration struct {
-	TaskType string
-	AvgS     float64
+// MetricsDurationStep holds one workflow/step average.
+type MetricsDurationStep struct {
+	WorkflowName string
+	Step         string
+	AvgS         float64
 }
 
 // MetricsPageData is the template data for the Metrics view.
 type MetricsPageData struct {
-	Agents          MetricsAgents
-	Tasks           MetricsTasks
-	Rates           MetricsRates
-	DurationsByType []MetricsDuration
+	Tasks          MetricsTasks
+	Rates          MetricsRates
+	DurationsByStep []MetricsDurationStep
 }
 
 func loadMetricsData(db *sql.DB) (*MetricsPageData, error) {
 	now := time.Now().UTC()
-	staleThreshold := now.Add(-60 * time.Second).Format(time.RFC3339)
-	offlineThreshold := now.Add(-24 * time.Hour).Format(time.RFC3339)
 	oneHourAgo := now.Add(-time.Hour).Format(time.RFC3339)
 	tenMinAgo := now.Add(-10 * time.Minute).Format(time.RFC3339)
 
 	var d MetricsPageData
-
-	// Agent counts
-	row := db.QueryRow(`
-		SELECT
-		  SUM(CASE WHEN last_heartbeat_at >= ? THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN last_heartbeat_at < ? AND last_heartbeat_at >= ? THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN last_heartbeat_at IS NULL OR last_heartbeat_at < ? THEN 1 ELSE 0 END)
-		FROM agents`,
-		staleThreshold, staleThreshold, offlineThreshold, offlineThreshold,
-	)
-	var active, stale, offline sql.NullInt64
-	if err := row.Scan(&active, &stale, &offline); err != nil {
-		return nil, err
-	}
-	d.Agents.Active = int(active.Int64)
-	d.Agents.Stale = int(stale.Int64)
-	d.Agents.Offline = int(offline.Int64)
 
 	// Task counts
 	rows, err := db.Query(`SELECT status, COUNT(*) FROM tasks GROUP BY status`)
@@ -196,7 +163,7 @@ func loadMetricsData(db *sql.DB) (*MetricsPageData, error) {
 	// Retry rate (last 1h)
 	var totalAttempts int
 	var retryNull sql.NullInt64
-	row = db.QueryRow(`
+	row := db.QueryRow(`
 		SELECT COUNT(*), SUM(CASE WHEN result_code='retry' THEN 1 ELSE 0 END)
 		FROM task_attempts WHERE started_at >= ?`, oneHourAgo)
 	if err := row.Scan(&totalAttempts, &retryNull); err != nil {
@@ -214,24 +181,24 @@ func loadMetricsData(db *sql.DB) (*MetricsPageData, error) {
 	}
 	d.Rates.ThroughputPerMin10m = float64(completed10m) / 10.0
 
-	// Avg duration by task type (last 1h)
+	// Avg duration by workflow + step (last 1h)
 	rows, err = db.Query(`
-		SELECT tt.name, AVG((julianday(ta.ended_at)-julianday(ta.started_at))*86400.0)
+		SELECT COALESCE(t.workflow_name,''), COALESCE(t.step,''),
+		       AVG((julianday(ta.ended_at)-julianday(ta.started_at))*86400.0)
 		FROM task_attempts ta
 		JOIN tasks t ON t.id=ta.task_id
-		JOIN task_types tt ON tt.id=t.task_type_id
 		WHERE ta.ended_at IS NOT NULL AND ta.result_code='completed' AND ta.started_at >= ?
-		GROUP BY tt.name ORDER BY tt.name`, oneHourAgo)
+		GROUP BY t.workflow_name, t.step ORDER BY t.workflow_name, t.step`, oneHourAgo)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var entry MetricsDuration
-		if err := rows.Scan(&entry.TaskType, &entry.AvgS); err != nil {
+		var entry MetricsDurationStep
+		if err := rows.Scan(&entry.WorkflowName, &entry.Step, &entry.AvgS); err != nil {
 			return nil, err
 		}
-		d.DurationsByType = append(d.DurationsByType, entry)
+		d.DurationsByStep = append(d.DurationsByStep, entry)
 	}
 	return &d, rows.Err()
 }

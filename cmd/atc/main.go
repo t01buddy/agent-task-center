@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/t01buddy/agent-task-center/internal/ai"
 	"github.com/t01buddy/agent-task-center/internal/api"
 	"github.com/t01buddy/agent-task-center/internal/config"
 	"github.com/t01buddy/agent-task-center/internal/dashboard"
@@ -47,6 +48,12 @@ func main() {
 	}
 	defer conn.Close()
 
+	provider, err := ai.NewProvider(cfg)
+	if err != nil {
+		slog.Error("init AI provider", "err", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -57,14 +64,13 @@ func main() {
 	mux.Handle("/logs", dashboard.LogsHandler(conn))
 	mux.Handle("/api/metrics", api.MetricsHandler(conn))
 	mux.Handle("/api/workspaces", api.WorkspacesHandler(conn))
-	mux.Handle("/api/task-types", api.TaskTypesHandler(conn))
-	mux.Handle("/api/agents/register", api.AgentsRegisterHandler(conn))
-	mux.Handle("/api/agents/", api.AgentsRouterHandler(conn))
-	mux.Handle("/api/agents", api.AgentsHandler(conn))
 	mux.Handle("/api/tasks", api.TasksHandler(conn))
 	mux.Handle("/api/tasks/lease", api.LeaseHandler(conn))
 	mux.Handle("/api/tasks/", api.TasksRouterHandler(conn))
 	mux.Handle("/api/logs", api.LogsHandler(conn))
+	mux.Handle("/api/workflows", api.WorkflowsHandler(conn))
+	mux.Handle("/api/workflows/", api.WorkflowsHandler(conn))
+	mux.Handle("/api/classify", api.ClassifyHandler(conn, provider))
 	dash := dashboard.Handler(conn)
 	mux.Handle("/tasks", dash)
 	mux.Handle("/tasks/detail", dash)

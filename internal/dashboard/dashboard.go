@@ -103,8 +103,9 @@ func taskListHandler(db *sql.DB) http.HandlerFunc {
 		q := r.URL.Query()
 		f.Workspace = q.Get("workspace")
 		f.Domain = q.Get("domain")
-		f.TaskType = q.Get("task_type")
-		f.AgentID = q.Get("agent_id")
+		f.WorkflowName = q.Get("workflow_name")
+		f.Step = q.Get("step")
+		f.WorkerID = q.Get("worker_id")
 		if ss := q["status"]; len(ss) > 0 {
 			for _, s := range ss {
 				if s != "" {
@@ -248,10 +249,17 @@ tr:hover td{background:#1a1a1a;cursor:pointer}
     </select>
   </div>
   <div>
-    <label>Task Type</label><br>
-    <select name="task_type">
+    <label>Workflow</label><br>
+    <select name="workflow_name">
       <option value="">Any</option>
-      {{range .Page.TaskTypes}}<option value="{{.}}" {{if eq . $.Page.Filter.TaskType}}selected{{end}}>{{.}}</option>{{end}}
+      {{range .Page.Workflows}}<option value="{{.}}" {{if eq . $.Page.Filter.WorkflowName}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </div>
+  <div>
+    <label>Step</label><br>
+    <select name="step">
+      <option value="">Any</option>
+      {{range .Page.Steps}}<option value="{{.}}" {{if eq . $.Page.Filter.Step}}selected{{end}}>{{.}}</option>{{end}}
     </select>
   </div>
   <div>
@@ -261,8 +269,8 @@ tr:hover td{background:#1a1a1a;cursor:pointer}
     </select>
   </div>
   <div>
-    <label>Agent</label><br>
-    <input name="agent_id" value="{{.Page.Filter.AgentID}}" placeholder="partial match">
+    <label>Worker</label><br>
+    <input name="worker_id" value="{{.Page.Filter.WorkerID}}" placeholder="partial match">
   </div>
   <div>
     <label>Min Priority</label><br>
@@ -290,7 +298,7 @@ tr:hover td{background:#1a1a1a;cursor:pointer}
 <tr @click="drawerLoading=true; drawerOpen=true; drawerHTML=''; fetch('/tasks/detail?id={{.ID}}').then(r=>r.text()).then(h=>{drawerHTML=h;drawerLoading=false})">
   <td title="{{.Title}}">{{truncate .Title 60}}</td>
   <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
-  <td>{{derefStr .AssignedAgentID}}</td>
+  <td>{{derefStr .AssignedWorkerID}}</td>
   <td>{{if .LeaseExpiresAt}}{{relTime (derefStr .LeaseExpiresAt)}}{{else}}—{{end}}</td>
   <td>{{.AttemptCount}}</td>
   <td>{{.Priority}}</td>
@@ -338,9 +346,10 @@ const taskDetailHTML = `
   <span class="label">ID</span><span>{{.Task.ID}}</span>
   <span class="label">Workspace</span><span>{{derefStr .Task.WorkspaceName}}</span>
   <span class="label">Domain</span><span>{{derefStr .Task.Domain}}</span>
-  <span class="label">Task Type</span><span>{{derefStr .Task.TaskTypeName}}</span>
+  <span class="label">Workflow</span><span>{{derefStr .Task.WorkflowName}}</span>
+  <span class="label">Step</span><span>{{derefStr .Task.Step}}</span>
   <span class="label">Priority</span><span>{{.Task.Priority}}</span>
-  <span class="label">Agent</span><span>{{derefStr .Task.AssignedAgentID}}</span>
+  <span class="label">Worker</span><span>{{derefStr .Task.AssignedWorkerID}}</span>
   <span class="label">Lease Expires</span><span>{{if .Task.LeaseExpiresAt}}{{relTime (derefStr .Task.LeaseExpiresAt)}}{{else}}—{{end}}</span>
   <span class="label">Attempts</span><span>{{.Task.AttemptCount}}</span>
   <span class="label">Created</span><span title="{{.Task.CreatedAt}}">{{relTime .Task.CreatedAt}}</span>
@@ -356,7 +365,7 @@ const taskDetailHTML = `
 <li>
   <span style="color:#555">{{relTime .CreatedAt}}</span>
   <strong>{{.EventType}}</strong>
-  {{if .AgentID}}<span style="color:#777"> agent={{derefStr .AgentID}}</span>{{end}}
+  {{if .WorkerID}}<span style="color:#777"> worker={{derefStr .WorkerID}}</span>{{end}}
   {{if .Payload}}<span style="color:#666"> {{derefStr .Payload}}</span>{{end}}
 </li>
 {{else}}<li style="color:#555">No events.</li>

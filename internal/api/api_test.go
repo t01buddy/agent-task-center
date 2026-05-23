@@ -81,9 +81,9 @@ func TestQueryLogs_Filters(t *testing.T) {
 
 	// Ingest 3 entries
 	body := `{"logs":[
-		{"task_id":"task-A","agent_id":"agent-1","level":"info","message":"msg1","timestamp":"2026-01-01T10:00:00Z"},
-		{"task_id":"task-A","agent_id":"agent-2","level":"warn","message":"msg2","timestamp":"2026-01-01T11:00:00Z"},
-		{"task_id":"task-B","agent_id":"agent-1","level":"error","message":"msg3","timestamp":"2026-01-01T12:00:00Z"}
+		{"task_id":"task-A","worker_id":"worker-1","level":"info","message":"msg1","timestamp":"2026-01-01T10:00:00Z"},
+		{"task_id":"task-A","worker_id":"worker-2","level":"warn","message":"msg2","timestamp":"2026-01-01T11:00:00Z"},
+		{"task_id":"task-B","worker_id":"worker-1","level":"error","message":"msg3","timestamp":"2026-01-01T12:00:00Z"}
 	]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -98,7 +98,7 @@ func TestQueryLogs_Filters(t *testing.T) {
 	}{
 		{"all", "", 3, 3},
 		{"by task", "task_id=task-A", 2, 2},
-		{"by agent", "agent_id=agent-1", 2, 2},
+		{"by worker", "worker_id=worker-1", 2, 2},
 		{"by level", "level=error", 1, 1},
 		{"by task+level", "task_id=task-A&level=warn", 1, 1},
 	}

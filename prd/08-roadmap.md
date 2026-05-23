@@ -4,22 +4,24 @@
 
 ## v1 — Local MVP
 
-**Goal:** A working local task center that any agent can use to claim, execute, and report tasks reliably.
+**Goal:** An AI-powered local task center where workers claim work, the LLM routes tickets to the right workflow step, and everything is auditable.
 
 ### Must-have
 
 - Single binary, SQLite backend, WAL mode.
-- Full REST API: workspaces, agents, task types, tasks, leasing, heartbeat, completion, failure, logs, metrics.
-- Atomic leasing with fencing tokens.
-- Automatic lease expiry and requeue.
+- Full REST API: workspaces, workflows, classify, tasks, leasing, heartbeat, completion, failure, logs, metrics.
+- AI classification: `POST /api/classify` with OpenAI-compatible API and Codex CLI provider support.
+- Context-hash deduplication in classify endpoint.
+- Atomic leasing with fencing tokens; no agent registration required (worker_id is a free string).
+- Automatic lease expiry and requeue (config read from task row, no task_types JOIN).
 - Append-only task events and log ingestion.
 - Dashboard: Metrics view, Task List view, Logs view (server-rendered, HTMX refresh).
-- Worker examples: Claude Code agent, Codex agent, generic shell agent.
+- Worker examples: Claude Code worker, Codex worker, generic shell worker.
 - `README.md` with quick-start instructions and one-command local demo.
 
 ### Out of scope for v1
 
-Everything listed in `01-prd.md` § Out of Scope.
+Everything listed in `01-prd.md` § Out of Scope. Notably: full DAG engine, agent/worker registration, task_types table.
 
 ### Distribution
 

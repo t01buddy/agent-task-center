@@ -17,10 +17,10 @@ type LogEntry struct {
 	ID        string `json:"id"`
 	TaskID    string `json:"task_id"`
 	AttemptID string `json:"attempt_id,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	WorkerID   string `json:"worker_id,omitempty"`
 	Level     string `json:"level"`
 	Message   string `json:"message"`
-	Timestamp string `json:"timestamp"`
+	CreatedAt string `json:"created_at"`
 }
 
 // ingestRequest is the body of POST /api/logs.
@@ -28,7 +28,7 @@ type ingestRequest struct {
 	Logs []struct {
 		TaskID    string `json:"task_id"`
 		AttemptID string `json:"attempt_id"`
-		AgentID   string `json:"agent_id"`
+		WorkerID   string `json:"worker_id"`
 		Level     string `json:"level"`
 		Message   string `json:"message"`
 		Timestamp string `json:"timestamp"`
@@ -84,12 +84,12 @@ func handleIngest(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		if entry.AttemptID != "" {
 			attemptID = entry.AttemptID
 		}
-		if entry.AgentID != "" {
-			agentID = entry.AgentID
+		if entry.WorkerID != "" {
+			agentID = entry.WorkerID
 		}
 
 		_, err := db.Exec(
-			`INSERT INTO task_logs (id, task_id, attempt_id, agent_id, level, message, created_at)
+			`INSERT INTO task_logs (id, task_id, attempt_id, worker_id, level, message, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			id, entry.TaskID, attemptID, agentID, level, entry.Message, ts,
 		)
@@ -109,7 +109,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	q := r.URL.Query()
 
 	taskID := strings.TrimSpace(q.Get("task_id"))
-	agentID := strings.TrimSpace(q.Get("agent_id"))
+	agentID := strings.TrimSpace(q.Get("worker_id"))
 	level := strings.ToLower(strings.TrimSpace(q.Get("level")))
 	since := strings.TrimSpace(q.Get("since"))
 	until := strings.TrimSpace(q.Get("until"))
@@ -136,7 +136,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		args = append(args, taskID)
 	}
 	if agentID != "" {
-		conditions = append(conditions, "agent_id = ?")
+		conditions = append(conditions, "worker_id = ?")
 		args = append(args, agentID)
 	}
 	if level != "" {
@@ -156,7 +156,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 
-	baseQuery := "SELECT id, task_id, COALESCE(attempt_id,''), COALESCE(agent_id,''), level, message, created_at FROM task_logs"
+	baseQuery := "SELECT id, task_id, COALESCE(attempt_id,''), COALESCE(worker_id,''), level, message, created_at FROM task_logs"
 	countQuery := "SELECT COUNT(*) FROM task_logs"
 	if len(conditions) > 0 {
 		where := " WHERE " + strings.Join(conditions, " AND ")
@@ -182,7 +182,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var entries []LogEntry
 	for rows.Next() {
 		var e LogEntry
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AttemptID, &e.AgentID, &e.Level, &e.Message, &e.Timestamp); err != nil {
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.AttemptID, &e.WorkerID, &e.Level, &e.Message, &e.CreatedAt); err != nil {
 			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}

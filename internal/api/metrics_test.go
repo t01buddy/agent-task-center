@@ -26,62 +26,14 @@ func TestMetricsHandler_EmptyDB(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp.Agents.Active != 0 || resp.Agents.Stale != 0 || resp.Agents.Offline != 0 {
-		t.Errorf("expected zero agent counts, got %+v", resp.Agents)
-	}
 	if resp.Tasks.Queued != 0 || resp.Tasks.Completed != 0 {
 		t.Errorf("expected zero task counts, got %+v", resp.Tasks)
 	}
 	if resp.Rates.RetryRate1h != 0 || resp.Rates.ThroughputPerMin10m != 0 {
 		t.Errorf("expected zero rates, got %+v", resp.Rates)
 	}
-	if len(resp.DurationsByType) != 0 {
-		t.Errorf("expected empty durations, got %v", resp.DurationsByType)
-	}
-}
-
-func TestMetricsHandler_AgentCounts(t *testing.T) {
-	conn := openTestDB(t, "agents")
-
-	now := time.Now().UTC()
-	activeTS := now.Add(-10 * time.Second).Format(time.RFC3339)
-	staleTS := now.Add(-5 * time.Minute).Format(time.RFC3339)
-	nowStr := now.Format(time.RFC3339)
-
-	_, err := conn.Exec(`
-		INSERT INTO agents(id,name,runtime,domain,last_heartbeat_at,registered_at) VALUES
-		  ('a1','A1','go','coding',?,?),
-		  ('a2','A2','go','coding',?,?),
-		  ('a3','A3','go','coding',NULL,?)`,
-		activeTS, nowStr,
-		staleTS, nowStr,
-		nowStr,
-	)
-	if err != nil {
-		t.Fatalf("insert agents: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
-	rec := httptest.NewRecorder()
-	api.MetricsHandler(conn).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var resp api.MetricsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-
-	if resp.Agents.Active != 1 {
-		t.Errorf("active: want 1, got %d", resp.Agents.Active)
-	}
-	if resp.Agents.Stale != 1 {
-		t.Errorf("stale: want 1, got %d", resp.Agents.Stale)
-	}
-	if resp.Agents.Offline != 1 {
-		t.Errorf("offline: want 1, got %d", resp.Agents.Offline)
+	if len(resp.DurationsByStep) != 0 {
+		t.Errorf("expected empty durations, got %v", resp.DurationsByStep)
 	}
 }
 

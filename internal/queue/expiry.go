@@ -14,10 +14,8 @@ type ExpiryConfig struct {
 	IntervalS int // ATC_EXPIRY_INTERVAL_S tick
 }
 
-// RunExpiryLoop starts the background goroutine that:
-//   - expires leased tasks whose lease_expires_at has passed
-//   - marks stale agents (last_heartbeat_at older than stale threshold)
-//
+// RunExpiryLoop starts the background goroutine that expires leased tasks
+// whose lease_expires_at has passed.
 // It returns when ctx is cancelled. Call as a goroutine.
 func RunExpiryLoop(ctx context.Context, db *sql.DB, cfg ExpiryConfig) {
 	interval := time.Duration(cfg.IntervalS) * time.Second
@@ -36,9 +34,6 @@ func RunExpiryLoop(ctx context.Context, db *sql.DB, cfg ExpiryConfig) {
 			if err := runExpiry(db); err != nil {
 				slog.Error("expiry loop error", "err", err)
 			}
-			if err := markStaleAgents(db); err != nil {
-				slog.Error("stale agent marking error", "err", err)
-			}
 		}
 	}
 }
@@ -48,14 +43,11 @@ func runExpiry(db *sql.DB) error {
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Find all leased tasks with expired lease_expires_at, joined with task_type for max_attempts/retry_backoff_s
+	// Read max_attempts and retry_backoff_s directly from task row (no JOIN needed).
 	rows, err := db.Query(`
-		SELECT t.id, t.attempt_count,
-		       COALESCE(tt.max_attempts, 3),
-		       COALESCE(tt.retry_backoff_s, 60)
-		FROM tasks t
-		LEFT JOIN task_types tt ON tt.id = t.task_type_id
-		WHERE t.status = 'leased' AND t.lease_expires_at < ?
+		SELECT id, attempt_count, max_attempts, retry_backoff_s
+		FROM tasks
+		WHERE status = 'leased' AND lease_expires_at < ?
 	`, nowStr)
 	if err != nil {
 		return err
@@ -94,13 +86,12 @@ func processExpiredTask(db *sql.DB, taskID string, attemptCount, maxAttempts, re
 	nowStr := now.Format(time.RFC3339)
 
 	if attemptCount < maxAttempts {
-		// Requeue with backoff
 		retryAfter := now.Add(time.Duration(retryBackoffS) * time.Second).Format(time.RFC3339)
 
 		_, err := db.Exec(`
 			UPDATE tasks
 			SET status = 'queued',
-			    assigned_agent_id = NULL,
+			    assigned_worker_id = NULL,
 			    lease_expires_at = NULL,
 			    retry_after = ?,
 			    updated_at = ?
@@ -110,7 +101,6 @@ func processExpiredTask(db *sql.DB, taskID string, attemptCount, maxAttempts, re
 			return err
 		}
 
-		// Append timed_out then retried events
 		if err := appendEvent(db, taskID, "", "", "timed_out", nil); err != nil {
 			slog.Error("append timed_out event", "task_id", taskID, "err", err)
 		}
@@ -120,11 +110,10 @@ func processExpiredTask(db *sql.DB, taskID string, attemptCount, maxAttempts, re
 
 		slog.Info("expired lease requeued", "task_id", taskID, "attempt_count", attemptCount, "retry_after", retryAfter)
 	} else {
-		// Terminal: timed_out
 		_, err := db.Exec(`
 			UPDATE tasks
 			SET status = 'timed_out',
-			    assigned_agent_id = NULL,
+			    assigned_worker_id = NULL,
 			    lease_expires_at = NULL,
 			    updated_at = ?
 			WHERE id = ?
@@ -142,42 +131,30 @@ func processExpiredTask(db *sql.DB, taskID string, attemptCount, maxAttempts, re
 	return nil
 }
 
-// markStaleAgents updates agents whose last_heartbeat_at is older than 60 s to status='stale'.
-func markStaleAgents(db *sql.DB) error {
-	threshold := time.Now().UTC().Add(-60 * time.Second).Format(time.RFC3339)
-	_, err := db.Exec(`
-		UPDATE agents
-		SET status = 'stale'
-		WHERE status = 'active'
-		  AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
-	`, threshold)
-	return err
-}
-
 // appendEvent inserts an immutable event row. Mirrors api.AppendEvent to avoid circular imports.
 func appendEvent(db interface {
 	Exec(string, ...any) (sql.Result, error)
-}, taskID, attemptID, agentID, eventType string, payload *string) error {
+}, taskID, attemptID, workerID, eventType string, payload *string) error {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var aID, agID, p any
+	var aID, wID, p any
 	if attemptID != "" {
 		aID = attemptID
 	}
-	if agentID != "" {
-		agID = agentID
+	if workerID != "" {
+		wID = workerID
 	}
 	if payload != nil {
 		p = *payload
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO task_events (id, task_id, attempt_id, agent_id, event_type, payload, created_at)
+		`INSERT INTO task_events (id, task_id, attempt_id, worker_id, event_type, payload, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, taskID, aID, agID, eventType, p, now,
+		id, taskID, aID, wID, eventType, p, now,
 	)
 	return err
 }

@@ -15,7 +15,7 @@ type TaskEvent struct {
 	ID        string  `json:"id"`
 	TaskID    string  `json:"task_id"`
 	AttemptID string  `json:"attempt_id,omitempty"`
-	AgentID   string  `json:"agent_id,omitempty"`
+	WorkerID  string  `json:"worker_id,omitempty"`
 	EventType string  `json:"event_type"`
 	Payload   *string `json:"payload,omitempty"`
 	CreatedAt string  `json:"created_at"`
@@ -26,18 +26,18 @@ type TaskEvent struct {
 // payload may be nil.
 func AppendEvent(db interface {
 	Exec(string, ...any) (sql.Result, error)
-}, taskID, attemptID, agentID, eventType string, payload *string) error {
+}, taskID, attemptID, workerID, eventType string, payload *string) error {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var aID, agID any
+	var aID, wID any
 	if attemptID != "" {
 		aID = attemptID
 	}
-	if agentID != "" {
-		agID = agentID
+	if workerID != "" {
+		wID = workerID
 	}
 	var p any
 	if payload != nil {
@@ -45,9 +45,9 @@ func AppendEvent(db interface {
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO task_events (id, task_id, attempt_id, agent_id, event_type, payload, created_at)
+		`INSERT INTO task_events (id, task_id, attempt_id, worker_id, event_type, payload, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, taskID, aID, agID, eventType, p, now,
+		id, taskID, aID, wID, eventType, p, now,
 	)
 	return err
 }
@@ -71,7 +71,7 @@ func TaskEventsHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		rows, err := db.Query(
-			`SELECT id, task_id, COALESCE(attempt_id,''), COALESCE(agent_id,''), event_type,
+			`SELECT id, task_id, COALESCE(attempt_id,''), COALESCE(worker_id,''), event_type,
 			        payload, created_at
 			 FROM task_events
 			 WHERE task_id = ?
@@ -88,7 +88,7 @@ func TaskEventsHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var e TaskEvent
 			var payload sql.NullString
-			if err := rows.Scan(&e.ID, &e.TaskID, &e.AttemptID, &e.AgentID, &e.EventType, &payload, &e.CreatedAt); err != nil {
+			if err := rows.Scan(&e.ID, &e.TaskID, &e.AttemptID, &e.WorkerID, &e.EventType, &payload, &e.CreatedAt); err != nil {
 				http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
 				return
 			}

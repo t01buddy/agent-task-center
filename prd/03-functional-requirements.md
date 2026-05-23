@@ -10,12 +10,6 @@ All requirements are for v1 unless labelled `[v2]`.
 |----|------|-------|----------|
 | FR-01 | Workspace | Create workspace | Must |
 | FR-02 | Workspace | List workspaces | Must |
-| FR-03 | Agent | Register agent | Must |
-| FR-04 | Agent | Agent heartbeat | Must |
-| FR-05 | Agent | List agents | Must |
-| FR-06 | Agent | Detect stale agents | Must |
-| FR-07 | Task Type | Create task type | Must |
-| FR-08 | Task Type | List task types | Must |
 | FR-09 | Task | Create task | Must |
 | FR-10 | Task | Query tasks | Must |
 | FR-11 | Task | Update task metadata | Must |
@@ -38,6 +32,11 @@ All requirements are for v1 unless labelled `[v2]`.
 | FR-28 | Examples | Codex worker example | Should |
 | FR-29 | Examples | Generic shell worker example | Should |
 | FR-30 | Config | Service configuration via env/flags | Must |
+| FR-31 | Workflow | Create workflow definition | Must |
+| FR-32 | Workflow | CRUD workflows by name | Must |
+| FR-33 | Classify | AI-powered ticket classification | Must |
+| FR-34 | Classify | Context-hash deduplication | Must |
+| FR-35 | Classify | run_id grouping | Should |
 
 ---
 
@@ -45,7 +44,7 @@ All requirements are for v1 unless labelled `[v2]`.
 
 ### FR-01 — Create Workspace
 
-A client can create a named workspace. A workspace is a logical namespace for tasks and agents. `workspace_id` is a user-defined string label (e.g. `personal`, `research`, `team-alpha`). There is no repo-path binding in v1.
+A client can create a named workspace. A workspace is a logical namespace for tasks. `workspace_id` is a user-defined string label (e.g. `personal`, `research`, `team-alpha`).
 
 - `name` is required, must be non-empty, max 100 characters.
 - Duplicate names are rejected with `409 Conflict`.
@@ -56,43 +55,57 @@ A client can retrieve all workspaces ordered by creation time.
 
 ---
 
-## Agent
+## Workflow
 
-### FR-03 — Register Agent
+### FR-31 — Create Workflow Definition
 
-A worker calls `POST /api/agents/register` to identify itself. Fields: `agent_id` (caller-provided, idempotent), `name`, `runtime`, `runtime_version`, `domain` (user-defined grouping label, e.g. `codex`, `claude-code`, `review`), `workspace_id` (optional), `capabilities` (optional JSON array of strings).
+`POST /api/workflows` creates a named workflow:
+- `name` — primary key (e.g. `bug-fix`, `feature-dev`). LLM uses this name for routing.
+- `definition` — free-form natural language describing the workflow and its steps. The LLM reads this to decide the next step.
+- `default_visibility_timeout_s` (default: 300).
+- `default_max_attempts` (default: 3).
+- `default_retry_backoff_s` (default: 60).
 
-Repeated registration with the same `agent_id` updates fields rather than creating a duplicate row.
+Duplicate names return `409 Conflict`.
 
-### FR-04 — Agent Heartbeat
+### FR-32 — Workflow CRUD
 
-A registered agent calls `POST /api/agents/{id}/heartbeat` periodically to signal it is alive. Updates `last_heartbeat_at`.
-
-### FR-05 — List Agents
-
-Returns all agents. Filterable by `workspace_id`, `domain`, `status`.
-
-### FR-06 — Detect Stale Agents
-
-An agent whose `last_heartbeat_at` is older than the configured stale threshold (default: 60 s, overridable per task type) is marked `status = stale`. Stale status is informational; it does not forcibly release leases (lease expiry handles that).
+- `GET /api/workflows` — list all workflows.
+- `GET /api/workflows/{name}` — get single workflow.
+- `PUT /api/workflows/{name}` — update definition and/or defaults.
+- `DELETE /api/workflows/{name}` — delete.
 
 ---
 
-## Task Type
+## Classification
 
-### FR-07 — Create Task Type
+### FR-33 — AI-Powered Ticket Classification
 
-Defines default configuration for a category of tasks:
-- `name` — unique identifier (e.g. `code-review`, `research`).
-- `default_visibility_timeout_s` — default lease duration in seconds.
-- `max_attempts` — maximum retry count before transitioning to `timed_out`.
-- `retry_backoff_s` — seconds added between retry attempts.
-- `hard_deadline_s` — maximum total wall-clock seconds from task creation; after this the task is cancelled regardless of attempts.
-- `stale_heartbeat_threshold_s` — inactivity duration before a leased task's agent is considered stale.
+`POST /api/classify` accepts:
+- `title` (required) — task title; used as lookup key.
+- `context` (optional) — arbitrary JSON object with ticket details.
+- `run_id` (optional) — caller-provided group ID linking tasks from the same run.
+- `workflow_name` (optional) — skip workflow detection if already known.
 
-### FR-08 — List Task Types
+**Logic:**
+1. Compute `context_hash = SHA-256(title + contextJSON)`.
+2. Look up existing task by `title`.
+3. If found and `context_hash` unchanged → return existing task (`reused_cache: true`).
+4. Determine `workflow_name`: from request → from existing task → LLM detects from all definitions.
+5. Call LLM with workflow definition + current task state → outputs `step`, `domain`, `priority`, `reasoning`.
+6. If existing task: `UPDATE` task, re-queue with new step.
+7. If new task: `INSERT` task with operational config inherited from workflow.
+8. Return `{task, classified: true, workflow_name, step, reasoning}`.
 
-Returns all task types.
+Returns `201` for new tasks, `200` for cache hits.
+
+### FR-34 — Context-Hash Deduplication
+
+If `POST /api/classify` is called with the same `title` and identical `context`, the existing task is returned without calling the LLM (`reused_cache: true`, `classified: false`).
+
+### FR-35 — run_id Grouping
+
+`run_id` is an optional caller-provided string that groups all tasks belonging to the same external ticket or automation run. The LLM can see the current task state (step + status) when `run_id` is provided, enabling it to advance the step.
 
 ---
 
@@ -103,22 +116,25 @@ Returns all task types.
 `POST /api/tasks` creates a task with:
 - `title` — human/agent-readable name (required).
 - `workspace_id` — optional; narrows visibility.
-- `domain` — optional worker-group filter (e.g. `codex`, `review`, `any`).
-- `task_type_id` — optional; inherits timeout/retry defaults from the task type.
+- `workflow_name` — optional; associates the task with a named workflow.
+- `step` — optional; the workflow step this task represents (e.g. `triage`, `implement`).
+- `run_id` — optional; groups tasks from the same external ticket or run.
+- `domain` — optional worker-group filter.
 - `priority` — integer (higher = more urgent; default 0).
-- `context` — arbitrary JSON object. See `06-api-spec.md` for recommended keys.
+- `context` — arbitrary JSON object.
+- `visibility_timeout_s`, `max_attempts`, `retry_backoff_s` — override workflow defaults.
 - `status` defaults to `queued`.
 
 ### FR-10 — Query Tasks
 
 `GET /api/tasks` with optional filters:
-- `workspace_id`, `domain`, `task_type_id`, `status`, `assigned_agent_id`, `priority_gte`.
+- `workspace_id`, `workflow_name`, `step`, `run_id`, `domain`, `status`, `assigned_worker_id`, `priority_gte`.
 - Pagination: `limit` (default 50, max 200), `offset`.
 - Ordered by `priority DESC, created_at ASC` by default.
 
 ### FR-11 — Update Task Metadata
 
-`PATCH /api/tasks/{id}` allows updating `title`, `priority`, `context`, `domain`, `workspace_id` when the task is in `queued` or `blocked` state. Updates to leased/running tasks are rejected.
+`PATCH /api/tasks/{id}` allows updating `title`, `priority`, `context`, `domain`, `workspace_id`, `workflow_name`, `step` when the task is in `queued` or `blocked` state.
 
 ### FR-12 — Cancel Task
 
@@ -130,33 +146,33 @@ Returns all task types.
 
 ### FR-13 — Atomic Task Lease
 
-`POST /api/tasks/lease` body: `agent_id`, optional `workspace_id`, `domain`, `task_type_id`, `priority_gte`.
+`POST /api/tasks/lease` body: `worker_id` (free string, no registration required), optional `workspace_id`, `workflow_name`, `step`, `domain`, `priority_gte`.
 
-The server atomically selects the highest-priority `queued` task matching the filters, sets `status = leased`, `assigned_agent_id`, `lease_expires_at = now + visibility_timeout`, increments `attempt_count`, creates a `task_attempts` row with a new `fencing_token`, and returns the task with its `fencing_token`.
+The server atomically selects the highest-priority `queued` task matching the filters, sets `status = leased`, `assigned_worker_id`, `lease_expires_at = now + visibility_timeout_s`, increments `attempt_count`, creates a `task_attempts` row with a new `fencing_token`, and returns the task with its `fencing_token`.
 
 If no eligible task exists, returns `204 No Content`.
 
 ### FR-14 — Task Heartbeat / Lease Extension
 
-`POST /api/tasks/{id}/heartbeat` body: `agent_id`, `fencing_token`, optional `progress` (0–100 integer), optional `message`.
+`POST /api/tasks/{id}/heartbeat` body: `worker_id`, `fencing_token`, optional `progress` (0–100), optional `message`.
 
-Extends `lease_expires_at` by the task type's `default_visibility_timeout_s`. Appends a `heartbeat` event. Rejects stale fencing tokens with `409`.
+Extends `lease_expires_at`. Appends a `heartbeat` event. Rejects stale fencing tokens with `409`.
 
 ### FR-15 — Complete Task
 
-`POST /api/tasks/{id}/complete` body: `agent_id`, `fencing_token`, optional `result` (JSON object).
+`POST /api/tasks/{id}/complete` body: `worker_id`, `fencing_token`, optional `result` (JSON object).
 
-Validates fencing token. Sets `status = completed`, records result, closes the attempt row. Appends a `completed` event.
+Validates fencing token. Sets `status = completed`, closes the attempt row. Appends a `completed` event.
 
 ### FR-16 — Fail Task
 
-`POST /api/tasks/{id}/fail` body: `agent_id`, `fencing_token`, `reason` (string), optional `retry_hint` (boolean).
+`POST /api/tasks/{id}/fail` body: `worker_id`, `fencing_token`, `reason` (string), optional `retry_hint` (boolean).
 
-Validates fencing token. If `attempt_count < max_attempts` and `retry_hint` is not false, sets `status = queued` for retry (respecting backoff). If attempts exhausted, sets `status = failed`. Appends a `failed` event.
+Validates fencing token. If `attempt_count < max_attempts` and `retry_hint` is not false, requeues with backoff. Otherwise sets `status = failed`. Appends a `failed` event.
 
 ### FR-17 — Fencing Token Enforcement
 
-Any request to `complete`, `fail`, or `heartbeat` that supplies a fencing token not matching the current active attempt must return `409 Conflict` with body `{"error": "stale_fencing_token"}`. The task state is not modified.
+Any request to `complete`, `fail`, or `heartbeat` that supplies a fencing token not matching the current active attempt must return `409 Conflict` with `{"error": "stale_fencing_token"}`.
 
 ---
 
@@ -164,13 +180,13 @@ Any request to `complete`, `fail`, or `heartbeat` that supplies a fencing token 
 
 ### FR-18 — Automatic Lease Expiry and Requeue
 
-A background process checks for tasks where `status = leased` and `lease_expires_at < now`. For each: if `attempt_count < max_attempts`, transition to `queued` (respects retry backoff by setting a `retry_after` timestamp). Append a `timed_out` event.
+A background process checks for tasks where `status = leased` and `lease_expires_at < now`. For each: if `attempt_count < max_attempts` (read from task row), transition to `queued` respecting `retry_backoff_s`. Append a `timed_out` event.
 
 Check interval: configurable, default 10 s.
 
 ### FR-19 — Max Attempts and Timed-Out Transition
 
-When a task's `attempt_count >= max_attempts` during expiry processing, transition to `timed_out` (terminal state). This is distinct from `failed` (agent-reported) and `cancelled` (human/API-initiated).
+When `attempt_count >= max_attempts` during expiry, transition to `timed_out` (terminal). Distinct from `failed` (worker-reported) and `cancelled` (API-initiated).
 
 ---
 
@@ -180,9 +196,9 @@ When a task's `attempt_count >= max_attempts` during expiry processing, transiti
 
 All state transitions append a row to `task_events`. Event types:
 
-`created`, `leased`, `heartbeat`, `progress`, `completed`, `failed`, `timed_out`, `retried`, `cancelled`.
+`created`, `classified`, `reclassified`, `leased`, `heartbeat`, `progress`, `completed`, `failed`, `timed_out`, `retried`, `cancelled`.
 
-Events are never deleted or updated. The events table is the audit log. Agents may also emit custom event types via the heartbeat or a dedicated event endpoint.
+Events are never deleted or updated.
 
 ---
 
@@ -190,15 +206,15 @@ Events are never deleted or updated. The events table is the audit log. Agents m
 
 ### FR-21 — Ingest Task Logs
 
-`POST /api/logs` (batch) body: array of `{ task_id, attempt_id (optional), agent_id (optional), level, message, timestamp }`.
+`POST /api/logs` (batch) body: array of `{ task_id, attempt_id (optional), worker_id (optional), level, message, timestamp }`.
 
 `level` values: `debug`, `info`, `warn`, `error`.
 
-Accepted synchronously; returns `201` after write.
+Returns `201` after write.
 
 ### FR-22 — Query Task Logs
 
-`GET /api/logs` with filters: `task_id`, `agent_id`, `level`, `since` (ISO timestamp), `until`, `limit` (default 100, max 1000), `offset`.
+`GET /api/logs` with filters: `task_id`, `worker_id`, `level`, `since`, `until`, `limit` (default 100, max 1000), `offset`.
 
 Ordered `created_at ASC` by default.
 
@@ -209,40 +225,29 @@ Ordered `created_at ASC` by default.
 ### FR-23 — Metrics View
 
 Displays aggregate counters and rates:
-- Active agents (heartbeat within threshold).
-- Task counts by status: `queued`, `leased`, `running`, `completed`, `failed`, `timed_out`, `cancelled`.
-- Retry rate (retried events / total attempts, last 1 h).
-- Average task duration by task type (last 1 h).
+- Task counts by status: `queued`, `leased`, `completed`, `failed`, `timed_out`, `cancelled`.
+- Retry rate (last 1 h).
+- Average task duration by workflow / step (last 1 h).
 - Throughput: tasks completed per minute (last 10 min).
 - Auto-refreshes via HTMX every 5 s.
 
 ### FR-24 — Task List View
 
-Filterable table of tasks. Filters: `workspace_id`, `domain`, `task_type_id`, `status`, `assigned_agent_id`, `priority_gte`.
+Filterable table of tasks. Filters: `workspace_id`, `workflow_name`, `step`, `domain`, `status`, `worker_id`, `priority_gte`.
 
-Columns: task ID (truncated), title, status, owner agent, lease expiry (relative), attempt count, priority, created at.
+Columns: title, status, worker, lease expiry (relative), attempt count, priority, created at.
 
 Clicking a row opens the task detail drawer (FR-26).
 
-Pagination: 50 rows per page.
-
 ### FR-25 — Logs View
 
-Paginated log table. Filters: `task_id`, `agent_id`, `level`, time range (since/until).
+Paginated log table. Filters: `task_id`, `worker_id`, `level`, time range.
 
-Columns: timestamp, task ID, agent ID, level, message.
-
-No live stream in v1; user refreshes or re-queries.
+Columns: timestamp, task ID, worker ID, level, message.
 
 ### FR-26 — Task Detail Drawer
 
-Slide-in panel (Alpine.js) showing full task data:
-- Task metadata (all fields).
-- `context` JSON rendered as formatted code block.
-- Task event timeline (all events in order).
-- Recent log lines for the task (last 50).
-
-Accessible from the Task List view without full page navigation.
+Slide-in panel showing full task data including workflow/step, context JSON, event timeline, and recent log lines.
 
 ---
 
@@ -250,11 +255,7 @@ Accessible from the Task List view without full page navigation.
 
 ### FR-27 — Claude Code Worker Example
 
-A shell script or `AGENTS.md` snippet that shows a Claude Code session how to:
-1. Register as an agent.
-2. Poll for tasks by `domain`.
-3. Heartbeat during execution.
-4. Report completion or failure.
+A shell script showing a Claude Code session how to poll for tasks by `workflow_name` + `step`, heartbeat, and report completion.
 
 ### FR-28 — Codex Worker Example
 
@@ -262,7 +263,7 @@ Same pattern for a Codex CLI worker.
 
 ### FR-29 — Generic Shell Worker Example
 
-A POSIX shell script (`worker.sh`) that demonstrates the polling loop with `curl` and `jq`. No agent-specific runtime assumptions.
+A POSIX shell script (`worker.sh`) using `curl` and `jq`.
 
 ---
 
@@ -270,7 +271,7 @@ A POSIX shell script (`worker.sh`) that demonstrates the polling loop with `curl
 
 ### FR-30 — Service Configuration
 
-Configurable via environment variables or a TOML config file (env takes precedence):
+Configurable via environment variables:
 
 | Setting | Env var | Default |
 |---------|---------|---------|
@@ -278,4 +279,9 @@ Configurable via environment variables or a TOML config file (env takes preceden
 | Listen address | `ATC_ADDR` | `:8765` |
 | Lease expiry check interval | `ATC_EXPIRY_INTERVAL_S` | `10` |
 | Graceful drain timeout | `ATC_DRAIN_TIMEOUT_S` | `5` |
-| Log format | `ATC_LOG_FORMAT` | `json` (`text` for dev) |
+| Log format | `ATC_LOG_FORMAT` | `json` |
+| LLM provider | `ATC_LLM_PROVIDER` | `openai` |
+| LLM base URL | `ATC_LLM_BASE_URL` | `https://api.openai.com/v1` |
+| LLM API key | `ATC_LLM_API_KEY` | — |
+| LLM model | `ATC_LLM_MODEL` | `gpt-4o-mini` |
+| Codex model override | `ATC_CODEX_MODEL` | — |

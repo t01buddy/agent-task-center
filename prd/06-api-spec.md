@@ -2,28 +2,23 @@
 
 Base path: `http://localhost:8765/api` (port configurable via `ATC_ADDR`).
 
-All request and response bodies are JSON. All timestamps are ISO 8601 UTC strings. All IDs are UUIDs unless stated otherwise.
+All request and response bodies are JSON. All timestamps are ISO 8601 UTC strings.
 
 ---
 
 ## Error Format
 
 ```json
-{
-  "error": "error_code",
-  "message": "Human-readable description."
-}
+{ "error": "error_code" }
 ```
 
-Common error codes: `not_found`, `conflict`, `stale_fencing_token`, `invalid_request`, `task_not_leasable`.
+Common error codes: `not_found`, `conflict`, `stale_fencing_token`, `invalid_request`.
 
 ---
 
 ## Workspaces
 
 ### `POST /api/workspaces`
-
-Create a workspace.
 
 **Request**
 ```json
@@ -48,77 +43,131 @@ Create a workspace.
 
 ---
 
-## Agents
+## Workflows
 
-### `POST /api/agents/register`
+### `POST /api/workflows`
 
-Register or update a worker.
-
-**Request**
-```json
-{
-  "agent_id": "my-codex-worker-1",
-  "name": "Codex Worker 1",
-  "runtime": "codex",
-  "runtime_version": "1.2.0",
-  "domain": "coding",
-  "workspace_id": "uuid-or-null",
-  "capabilities": ["go", "python"]
-}
-```
-
-**Response `200`** (upsert — same shape as agent object).
-
----
-
-### `POST /api/agents/{id}/heartbeat`
-
-**Request** (empty body accepted)
-
-**Response `200`**
-```json
-{ "agent_id": "my-codex-worker-1", "status": "active", "last_heartbeat_at": "..." }
-```
-
----
-
-### `GET /api/agents`
-
-Query parameters: `workspace_id`, `domain`, `status`.
-
-**Response `200`**
-```json
-{ "agents": [ { ...agent object... } ] }
-```
-
----
-
-## Task Types
-
-### `POST /api/task-types`
+Create a named workflow with a natural-language definition.
 
 **Request**
 ```json
 {
-  "name": "code-review",
-  "default_visibility_timeout_s": 600,
-  "max_attempts": 3,
-  "retry_backoff_s": 120,
-  "hard_deadline_s": 7200,
-  "stale_heartbeat_threshold_s": 90
+  "name": "bug-fix",
+  "definition": "A bug-fix workflow with steps: triage (understand and reproduce), implement (write the fix), review (code review), deploy (ship it).",
+  "default_visibility_timeout_s": 300,
+  "default_max_attempts": 3,
+  "default_retry_backoff_s": 60
 }
 ```
 
-**Response `201`** (task type object).
+**Response `201`**
+```json
+{
+  "workflow": {
+    "name": "bug-fix",
+    "definition": "...",
+    "default_visibility_timeout_s": 300,
+    "default_max_attempts": 3,
+    "default_retry_backoff_s": 60,
+    "created_at": "...",
+    "updated_at": "..."
+  }
+}
+```
+
+**Errors:** `409` if name already exists.
 
 ---
 
-### `GET /api/task-types`
+### `GET /api/workflows`
 
 **Response `200`**
 ```json
-{ "task_types": [ { ...task type object... } ] }
+{ "workflows": [ { ...workflow object... } ] }
 ```
+
+---
+
+### `GET /api/workflows/{name}`
+
+**Response `200`**
+```json
+{ "workflow": { ...workflow object... } }
+```
+
+**Errors:** `404` if not found.
+
+---
+
+### `PUT /api/workflows/{name}`
+
+Update definition and/or defaults. Only provided fields change.
+
+**Request**
+```json
+{ "definition": "Updated definition.", "default_max_attempts": 5 }
+```
+
+**Response `200`**
+```json
+{ "workflow": { ...updated workflow... } }
+```
+
+---
+
+### `DELETE /api/workflows/{name}`
+
+**Response `204`**
+
+---
+
+## Classification
+
+### `POST /api/classify`
+
+Classify an incoming ticket (GitHub issue, Jira, Linear, etc.) into a workflow step and queue it for workers.
+
+**Request**
+```json
+{
+  "title": "Fix auth bypass in login",
+  "context": {
+    "source": "github_issue",
+    "url": "https://github.com/org/repo/issues/42",
+    "description": "Users can log in without a password."
+  },
+  "run_id": "issue-42",
+  "workflow_name": "bug-fix"
+}
+```
+
+- `title` (required) — task title; used as lookup key for deduplication.
+- `context` (optional) — arbitrary JSON with ticket details.
+- `run_id` (optional) — groups tasks from the same external ticket.
+- `workflow_name` (optional) — skip detection if workflow is already known.
+
+**Response `201`** — new task created or existing task updated:
+```json
+{
+  "task": { ...task object... },
+  "classified": true,
+  "reused_cache": false,
+  "workflow_name": "bug-fix",
+  "step": "triage",
+  "reasoning": "No prior steps for run issue-42; triage is the entry point."
+}
+```
+
+**Response `200`** — cache hit (same title + same context):
+```json
+{
+  "task": { ...existing task... },
+  "classified": false,
+  "reused_cache": true
+}
+```
+
+**Errors:** `422` if no workflows exist or the specified `workflow_name` is not found.
 
 ---
 
@@ -131,20 +180,21 @@ Query parameters: `workspace_id`, `domain`, `status`.
 {
   "title": "Review PR #42 for security issues",
   "workspace_id": "uuid",
+  "workflow_name": "bug-fix",
+  "step": "review",
+  "run_id": "issue-42",
   "domain": "review",
-  "task_type_id": "uuid-or-null",
   "priority": 10,
   "context": {
-    "instructions": "Review the diff for SQL injection and XSS vulnerabilities.",
-    "input": { "pr_url": "https://github.com/org/repo/pull/42" },
-    "expected_output": "A structured findings report.",
-    "repo_path": "/home/user/projects/myapp",
-    "refs": ["https://owasp.org/www-community/attacks/SQL_Injection"]
-  }
+    "pr_url": "https://github.com/org/repo/pull/42"
+  },
+  "visibility_timeout_s": 600,
+  "max_attempts": 3,
+  "retry_backoff_s": 60
 }
 ```
 
-**Response `201`** (task object, see below).
+**Response `201`** (task object).
 
 ---
 
@@ -152,15 +202,21 @@ Query parameters: `workspace_id`, `domain`, `status`.
 
 ```json
 {
-  "id": "uuid",
+  "id": "hex-uuid",
   "workspace_id": "uuid",
-  "domain": "review",
-  "task_type_id": "uuid",
-  "title": "Review PR #42 for security issues",
-  "priority": 10,
-  "context": { "..." : "..." },
+  "workflow_name": "bug-fix",
+  "step": "triage",
+  "run_id": "issue-42",
+  "domain": "coding",
+  "title": "Fix auth bypass in login",
+  "priority": 50,
+  "context": { "...": "..." },
+  "context_hash": "sha256hex",
+  "visibility_timeout_s": 300,
+  "max_attempts": 3,
+  "retry_backoff_s": 60,
   "status": "queued",
-  "assigned_agent_id": null,
+  "assigned_worker_id": null,
   "lease_expires_at": null,
   "attempt_count": 0,
   "created_at": "...",
@@ -177,10 +233,12 @@ Query parameters:
 | Param | Type | Description |
 |-------|------|-------------|
 | `workspace_id` | string | Filter by workspace |
+| `workflow_name` | string | Filter by workflow |
+| `step` | string | Filter by step |
+| `run_id` | string | Filter by run group |
 | `domain` | string | Filter by domain |
-| `task_type_id` | string | Filter by task type |
-| `status` | string | Filter by status (comma-separated for multiple) |
-| `assigned_agent_id` | string | Filter by owner agent |
+| `status` | string | Filter by status (comma-separated) |
+| `assigned_worker_id` | string | Filter by worker |
 | `priority_gte` | integer | Minimum priority |
 | `limit` | integer | Max results (default 50, max 200) |
 | `offset` | integer | Pagination offset |
@@ -194,12 +252,7 @@ Query parameters:
 
 ### `PATCH /api/tasks/{id}`
 
-Update `title`, `priority`, `context`, `domain`, or `workspace_id`. Only allowed when `status` is `queued` or `blocked`.
-
-**Request** (partial update — only provided fields are changed)
-```json
-{ "priority": 20, "context": { "instructions": "Updated instructions." } }
-```
+Update `title`, `priority`, `context`, `domain`, `workspace_id`, `workflow_name`, or `step`. Only allowed when `status` is `queued` or `blocked`.
 
 **Response `200`** (updated task object).
 
@@ -207,11 +260,11 @@ Update `title`, `priority`, `context`, `domain`, or `workspace_id`. Only allowed
 
 ### `DELETE /api/tasks/{id}`
 
-Cancel a task. Only allowed when `status` is `queued` or `blocked`.
+Cancel a task. Only allowed when status is `queued` or `blocked`.
 
 **Response `204`**
 
-**Errors:** `409` if task is currently `leased`.
+**Errors:** `409` if currently leased.
 
 ---
 
@@ -224,19 +277,22 @@ Atomically claim the next eligible task.
 **Request**
 ```json
 {
-  "agent_id": "my-codex-worker-1",
-  "workspace_id": "uuid",
+  "worker_id": "codex-worker-1",
+  "workflow_name": "bug-fix",
+  "step": "implement",
   "domain": "coding",
-  "task_type_id": "uuid-or-null",
   "priority_gte": 0
 }
 ```
+
+`worker_id` is a free string — no prior registration required.
 
 **Response `200`** — task leased:
 ```json
 {
   "task": { ...task object with status "leased"... },
   "fencing_token": 3,
+  "attempt_id": "hex-uuid",
   "lease_expires_at": "2026-05-22T10:10:00Z"
 }
 ```
@@ -247,15 +303,13 @@ Atomically claim the next eligible task.
 
 ### `POST /api/tasks/{id}/heartbeat`
 
-Extend lease and optionally report progress.
-
 **Request**
 ```json
 {
-  "agent_id": "my-codex-worker-1",
+  "worker_id": "codex-worker-1",
   "fencing_token": 3,
   "progress": 45,
-  "message": "Running security scanner."
+  "message": "Running tests."
 }
 ```
 
@@ -273,15 +327,16 @@ Extend lease and optionally report progress.
 **Request**
 ```json
 {
-  "agent_id": "my-codex-worker-1",
+  "worker_id": "codex-worker-1",
   "fencing_token": 3,
-  "result": { "findings": 0, "report_url": "..." }
+  "result": { "pr_url": "https://github.com/org/repo/pull/43" }
 }
 ```
 
-**Response `200`** (updated task object with `status: "completed"`).
-
-**Errors:** `409` for stale fencing token.
+**Response `200`**
+```json
+{ "task": { ...task object with status "completed"... } }
+```
 
 ---
 
@@ -290,16 +345,38 @@ Extend lease and optionally report progress.
 **Request**
 ```json
 {
-  "agent_id": "my-codex-worker-1",
+  "worker_id": "codex-worker-1",
   "fencing_token": 3,
-  "reason": "Timeout waiting for external API.",
+  "reason": "Tests failed.",
   "retry_hint": true
 }
 ```
 
-**Response `200`** (updated task object; `status` is `queued` if retrying, `failed` if exhausted).
+**Response `200`**
+```json
+{ "task": { ...task object... } }
+```
 
-**Errors:** `409` for stale fencing token.
+---
+
+### `GET /api/tasks/{id}/events`
+
+**Response `200`**
+```json
+{
+  "events": [
+    {
+      "id": "hex",
+      "task_id": "hex",
+      "attempt_id": "hex",
+      "worker_id": "codex-worker-1",
+      "event_type": "leased",
+      "payload": null,
+      "created_at": "..."
+    }
+  ]
+}
+```
 
 ---
 
@@ -307,19 +384,19 @@ Extend lease and optionally report progress.
 
 ### `POST /api/logs`
 
-Batch ingest log lines.
+Batch-ingest log lines.
 
 **Request**
 ```json
 {
   "logs": [
     {
-      "task_id": "uuid",
-      "attempt_id": "uuid",
-      "agent_id": "my-codex-worker-1",
+      "task_id": "hex",
+      "attempt_id": "hex",
+      "worker_id": "codex-worker-1",
       "level": "info",
-      "message": "Starting security scan.",
-      "timestamp": "2026-05-22T10:05:00Z"
+      "message": "Starting implementation.",
+      "timestamp": "2026-05-22T10:01:00Z"
     }
   ]
 }
@@ -334,11 +411,19 @@ Batch ingest log lines.
 
 ### `GET /api/logs`
 
-Query parameters: `task_id`, `agent_id`, `level`, `since` (ISO timestamp), `until`, `limit` (default 100, max 1000), `offset`.
+| Param | Type | Description |
+|-------|------|-------------|
+| `task_id` | string | Filter by task |
+| `worker_id` | string | Filter by worker |
+| `level` | string | Filter by level |
+| `since` | ISO timestamp | Lower bound |
+| `until` | ISO timestamp | Upper bound |
+| `limit` | integer | Max results (default 100, max 1000) |
+| `offset` | integer | Pagination offset |
 
 **Response `200`**
 ```json
-{ "logs": [ { ...log object... } ], "total": 840 }
+{ "logs": [ { ...log entry... } ], "total": 500 }
 ```
 
 ---
@@ -350,42 +435,16 @@ Query parameters: `task_id`, `agent_id`, `level`, `since` (ISO timestamp), `unti
 **Response `200`**
 ```json
 {
-  "agents": {
-    "active": 4,
-    "stale": 1,
-    "offline": 0
-  },
   "tasks": {
-    "queued": 12,
-    "leased": 3,
-    "running": 3,
-    "completed": 284,
-    "failed": 7,
-    "timed_out": 2,
-    "cancelled": 1
+    "queued": 5, "leased": 2, "running": 0,
+    "completed": 120, "failed": 3, "timed_out": 1, "cancelled": 0
   },
   "rates": {
-    "retry_rate_1h": 0.03,
-    "throughput_per_min_10m": 2.4
+    "retry_rate_1h": 0.05,
+    "throughput_per_min_10m": 2.3
   },
-  "durations_by_type": [
-    { "task_type": "code-review", "avg_s": 142 }
+  "durations_by_step": [
+    { "workflow_name": "bug-fix", "step": "implement", "avg_s": 142.5 }
   ]
 }
 ```
-
----
-
-## `context` JSON Conventions
-
-The `context` field is an arbitrary JSON object. The server does not enforce a schema. The following keys are recommended for interoperability between workers and task creators:
-
-| Key | Type | Purpose |
-|-----|------|---------|
-| `instructions` | string | Human/agent-readable task instruction |
-| `input` | object | Domain-specific input payload |
-| `expected_output` | string | Success criteria or output description |
-| `repo_path` | string | Local filesystem path to a relevant repository |
-| `refs` | array of strings | URLs or file paths for reference material |
-
-Workers should tolerate missing keys; not all tasks will use all conventions.

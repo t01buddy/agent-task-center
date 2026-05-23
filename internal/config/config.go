@@ -14,6 +14,13 @@ type Config struct {
 	ExpiryIntervalS int    // ATC_EXPIRY_INTERVAL_S
 	DrainTimeoutS   int    // ATC_DRAIN_TIMEOUT_S
 	LogFormat       string // ATC_LOG_FORMAT: "json" or "text"
+
+	// LLM provider settings
+	LLMProvider string // ATC_LLM_PROVIDER: "openai" (default) or "codex"
+	LLMBaseURL  string // ATC_LLM_BASE_URL: OpenAI-compatible base URL
+	LLMAPIKey   string // ATC_LLM_API_KEY
+	LLMModel    string // ATC_LLM_MODEL
+	CodexModel  string // ATC_CODEX_MODEL: optional model flag for codex exec
 }
 
 // tomlConfig mirrors Config with TOML-friendly keys for file parsing.
@@ -34,6 +41,9 @@ func Load() Config {
 		ExpiryIntervalS: 10,
 		DrainTimeoutS:   5,
 		LogFormat:       "json",
+		LLMProvider:     "openai",
+		LLMBaseURL:      "https://api.openai.com/v1",
+		LLMModel:        "gpt-4o-mini",
 	}
 
 	// Load optional TOML file first (lowest precedence after defaults).
@@ -77,6 +87,21 @@ func Load() Config {
 	}
 	if v := os.Getenv("ATC_LOG_FORMAT"); v == "text" || v == "json" {
 		cfg.LogFormat = v
+	}
+	if v := os.Getenv("ATC_LLM_PROVIDER"); v == "openai" || v == "codex" {
+		cfg.LLMProvider = v
+	}
+	if v := os.Getenv("ATC_LLM_BASE_URL"); v != "" {
+		cfg.LLMBaseURL = v
+	}
+	if v := os.Getenv("ATC_LLM_API_KEY"); v != "" {
+		cfg.LLMAPIKey = v
+	}
+	if v := os.Getenv("ATC_LLM_MODEL"); v != "" {
+		cfg.LLMModel = v
+	}
+	if v := os.Getenv("ATC_CODEX_MODEL"); v != "" {
+		cfg.CodexModel = v
 	}
 
 	return cfg
