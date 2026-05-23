@@ -58,6 +58,9 @@ func main() {
 	mux.Handle("/api/metrics", api.MetricsHandler(conn))
 	mux.Handle("/api/tasks/", api.TaskEventsHandler(conn))
 	mux.Handle("/api/logs", api.LogsHandler(conn))
+	dash := dashboard.Handler(conn)
+	mux.Handle("/tasks", dash)
+	mux.Handle("/tasks/detail", dash)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,
