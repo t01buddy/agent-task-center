@@ -15,6 +15,7 @@ import (
 	"github.com/t01buddy/agent-task-center/internal/config"
 	"github.com/t01buddy/agent-task-center/internal/dashboard"
 	"github.com/t01buddy/agent-task-center/internal/db"
+	"github.com/t01buddy/agent-task-center/internal/queue"
 )
 
 const version = "0.1.0"
@@ -69,6 +70,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	expiryCtx, expiryCancel := context.WithCancel(context.Background())
+	defer expiryCancel()
+	go queue.RunExpiryLoop(expiryCtx, conn, queue.ExpiryConfig{IntervalS: cfg.ExpiryIntervalS})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
