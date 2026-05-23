@@ -50,6 +50,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	})
+	mux.Handle("/", dashboard.MetricsPageHandler(conn))
+	mux.Handle("/api/metrics-partial", dashboard.MetricsPartialHandler(conn))
 	mux.Handle("/logs", dashboard.LogsHandler(conn))
 
 	srv := &http.Server{
