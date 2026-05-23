@@ -668,8 +668,8 @@ func handleCompleteTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id s
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = db.Exec(`
-		UPDATE tasks SET status = 'completed', assigned_worker_id = NULL,
-		    lease_expires_at = NULL, updated_at = ? WHERE id = ?`, now, id)
+		UPDATE tasks SET status = 'completed', assigned_worker_id = ?,
+		    lease_expires_at = NULL, updated_at = ? WHERE id = ?`, req.WorkerID, now, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error: "+err.Error())
 		return
@@ -689,7 +689,7 @@ func handleCompleteTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id s
 		writeError(w, http.StatusInternalServerError, "db error: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, task)
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
 // handleFailTask reports a task failure.
@@ -749,7 +749,7 @@ func handleFailTask(db *sql.DB, w http.ResponseWriter, r *http.Request, id strin
 		writeError(w, http.StatusInternalServerError, "db error: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, task)
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
 // --- helpers ---
