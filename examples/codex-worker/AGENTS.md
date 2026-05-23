@@ -8,36 +8,24 @@ Follow these instructions every session.
 Read environment variables:
 
 - `ATC_URL` — base URL (default: `http://localhost:8765`)
-- `AGENT_ID` — your unique ID (default: `codex-worker-1`)
-- `DOMAIN` — task domain (e.g. `coding`; empty = accept any)
-- `WORKSPACE_ID` — optional UUID workspace scope
+- `WORKER_ID` — your unique worker ID (default: `codex-worker-1`)
+- `WORKFLOW_NAME` — workflow to poll (e.g. `bug-fix`; required)
+- `STEP` — step within that workflow to claim (e.g. `implement`; required)
+- `DOMAIN` — optional domain filter (e.g. `coding`)
 
-## Step 1: Register
+No registration required. Workers are identified by `WORKER_ID` — a free string you choose.
 
-```bash
-curl -s -X POST "$ATC_URL/api/agents/register" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "'"$AGENT_ID"'",
-    "name": "Codex Worker",
-    "runtime": "codex",
-    "runtime_version": "'"$(codex --version 2>/dev/null || echo 'unknown')"'",
-    "domain": "'"$DOMAIN"'",
-    "workspace_id": null,
-    "capabilities": ["code-generation", "code-review", "refactoring"]
-  }'
-```
-
-## Step 2: Lease a Task
+## Step 1: Lease a Task
 
 ```bash
 LEASE=$(curl -s -X POST "$ATC_URL/api/tasks/lease" \
   -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "'"$AGENT_ID"'",
-    "domain": "'"$DOMAIN"'",
-    "priority_gte": 0
-  }')
+  -d "{
+    \"worker_id\": \"$WORKER_ID\",
+    \"workflow_name\": \"$WORKFLOW_NAME\",
+    \"step\": \"$STEP\",
+    \"domain\": \"$DOMAIN\"
+  }")
 
 TASK_ID=$(echo "$LEASE" | jq -r '.task.id // empty')
 FENCING_TOKEN=$(echo "$LEASE" | jq -r '.fencing_token // empty')
@@ -46,47 +34,41 @@ INSTRUCTIONS=$(echo "$LEASE" | jq -r '.task.context.instructions // empty')
 
 - If `TASK_ID` is empty → 204 No Content (no task). Sleep 5 s and retry.
 
-## Step 3: Run Codex on the Task
-
-Pass `instructions` and `context` to Codex:
+## Step 2: Run Codex on the Task
 
 ```bash
 REPO_PATH=$(echo "$LEASE" | jq -r '.task.context.repo_path // "."')
-REFS=$(echo "$LEASE" | jq -r '.task.context.refs // [] | join(" ")')
 
-# Example: run Codex in the relevant repo
-codex --approval-mode full-auto \
-  --context "$INSTRUCTIONS" \
-  "$REPO_PATH"
+codex exec --dangerously-bypass-approvals-and-sandbox "$INSTRUCTIONS"
 ```
 
-Send a heartbeat every 30 s:
+Send a heartbeat every 30 s while Codex is running:
 
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/heartbeat" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"progress":50,"message":"codex running"}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"progress\":50,\"message\":\"codex running\"}"
 ```
 
-## Step 4: Report
+## Step 3: Report
 
 **Complete:**
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/complete" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"result":{"output":"..."}}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"result\":{\"output\":\"...\"}}"
 ```
 
 **Fail:**
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/fail" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"reason":"codex exited non-zero","retry_hint":false}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"reason\":\"codex exited non-zero\",\"retry_hint\":false}"
 ```
 
-## Step 5: Loop
+## Step 4: Loop
 
-Return to Step 2.
+Return to Step 1.
 
 ## Context Conventions
 

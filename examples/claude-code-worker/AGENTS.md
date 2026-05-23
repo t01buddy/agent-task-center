@@ -8,41 +8,30 @@ Follow these instructions every time you start a session.
 Read the following environment variables before doing anything else:
 
 - `ATC_URL` — base URL of the ATC server (default: `http://localhost:8765`)
-- `AGENT_ID` — your unique agent ID (default: `claude-code-worker-1`)
-- `DOMAIN` — task domain to poll (e.g. `coding`, `review`; leave empty to accept any)
-- `WORKSPACE_ID` — optional UUID to scope tasks to a specific workspace
+- `WORKER_ID` — your unique worker ID (default: `claude-code-worker-1`)
+- `WORKFLOW_NAME` — workflow to poll (e.g. `bug-fix`; required)
+- `STEP` — step within that workflow to claim (e.g. `implement`, `review`; required)
+- `DOMAIN` — optional domain filter (e.g. `coding`, `review`)
 
-## Step 1: Register
+No registration required. Workers are identified by `WORKER_ID` — a free string you choose.
 
-```bash
-curl -s -X POST "$ATC_URL/api/agents/register" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "'"$AGENT_ID"'",
-    "name": "Claude Code Worker",
-    "runtime": "claude-code",
-    "domain": "'"$DOMAIN"'",
-    "workspace_id": null,
-    "capabilities": ["go", "python", "typescript", "code-review"]
-  }'
-```
-
-## Step 2: Poll for a Task
+## Step 1: Poll for a Task
 
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/lease" \
   -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "'"$AGENT_ID"'",
-    "domain": "'"$DOMAIN"'",
-    "priority_gte": 0
-  }'
+  -d "{
+    \"worker_id\": \"$WORKER_ID\",
+    \"workflow_name\": \"$WORKFLOW_NAME\",
+    \"step\": \"$STEP\",
+    \"domain\": \"$DOMAIN\"
+  }"
 ```
 
-- **200** → task leased. Extract `task.id`, `fencing_token`, and `task.context.instructions`.
+- **200** → task leased. Extract `task.id`, `task.context`, and `fencing_token`.
 - **204** → no task available. Wait 5 s and retry.
 
-## Step 3: Execute the Task
+## Step 2: Execute the Task
 
 Read `task.context` carefully:
 
@@ -50,41 +39,42 @@ Read `task.context` carefully:
 |-----|---------|
 | `instructions` | What you must do |
 | `input` | Domain-specific input (e.g. PR URL, file paths) |
-| `expected_output` | Describe what a correct result looks like |
+| `expected_output` | What a correct result looks like |
 | `repo_path` | Local repo path to work in (if any) |
 | `refs` | URLs or file paths for reference material |
 
-Do the work. If the task takes more than 30 s, send a heartbeat:
+Do the work. For tasks taking more than 30 s, send heartbeats to extend the lease:
 
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/heartbeat" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"progress":50,"message":"halfway"}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"progress\":50,\"message\":\"halfway\"}"
 ```
 
-## Step 4: Report Result
+## Step 3: Report Result
 
 **Success:**
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/complete" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"result":{"summary":"..."}}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"result\":{\"summary\":\"...\"}}"
 ```
 
 **Failure:**
 ```bash
 curl -s -X POST "$ATC_URL/api/tasks/$TASK_ID/fail" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"'"$AGENT_ID"'","fencing_token":'"$FENCING_TOKEN"',"reason":"...","retry_hint":true}'
+  -d "{\"worker_id\":\"$WORKER_ID\",\"fencing_token\":$FENCING_TOKEN,\"reason\":\"...\",\"retry_hint\":true}"
 ```
 
-## Step 5: Loop
+## Step 4: Loop
 
-Go back to Step 2 and poll again.
+Go back to Step 1 and poll again.
 
 ## Rules
 
 - Always heartbeat for tasks that take more than 30 s.
 - Never mark a task complete unless you have verified the output.
-- Use `retry_hint: true` only for transient failures (network, timeout). Use `false` for permanent failures.
-- Log each task ID and result for observability.
+- Use `retry_hint: true` for transient failures (network, timeout). Use `false` for permanent failures.
+- Log each `task.id`, `step`, and result for observability.
+- The `fencing_token` is your authority — include it on every heartbeat, complete, and fail call.
