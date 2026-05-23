@@ -38,18 +38,29 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// TasksRouterHandler routes /api/tasks/{id} and /api/tasks/{id}/events.
-// PATCH and DELETE go to TaskByIDHandler; GET .../events goes to TaskEventsHandler.
+// TasksRouterHandler routes /api/tasks/{id} and sub-paths.
+// Routes: /events → events, /heartbeat → heartbeat, /complete → complete, /fail → fail,
+// bare /{id} → PATCH/DELETE by ID handler.
 func TasksRouterHandler(db *sql.DB) http.HandlerFunc {
 	eventsHandler := TaskEventsHandler(db)
 	byIDHandler := TaskByIDHandler(db)
+	heartbeatHandler := HeartbeatHandler(db)
+	completeHandler := CompleteHandler(db)
+	failHandler := FailHandler(db)
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
-		if strings.HasSuffix(path, "/events") {
+		switch {
+		case strings.HasSuffix(path, "/events"):
 			eventsHandler(w, r)
-			return
+		case strings.HasSuffix(path, "/heartbeat"):
+			heartbeatHandler(w, r)
+		case strings.HasSuffix(path, "/complete"):
+			completeHandler(w, r)
+		case strings.HasSuffix(path, "/fail"):
+			failHandler(w, r)
+		default:
+			byIDHandler(w, r)
 		}
-		byIDHandler(w, r)
 	}
 }
 
