@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,18 +8,7 @@ import (
 	"time"
 
 	"github.com/t01buddy/agent-task-center/internal/api"
-	"github.com/t01buddy/agent-task-center/internal/db"
 )
-
-func openTestDB(t *testing.T, name string) *sql.DB {
-	t.Helper()
-	conn, err := db.OpenDefault("file::memory:?mode=memory&cache=shared&_testname=" + name)
-	if err != nil {
-		t.Fatalf("OpenDefault: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return conn
-}
 
 func TestMetricsHandler_EmptyDB(t *testing.T) {
 	conn := openTestDB(t, "empty")
