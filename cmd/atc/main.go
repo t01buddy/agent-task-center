@@ -57,6 +57,7 @@ func main() {
 	mux.Handle("/logs", dashboard.LogsHandler(conn))
 	mux.Handle("/api/metrics", api.MetricsHandler(conn))
 	mux.Handle("/api/workspaces", api.WorkspacesHandler(conn))
+	mux.Handle("/api/task-types", api.TaskTypesHandler(conn))
 	mux.Handle("/api/tasks", api.TasksHandler(conn))
 	mux.Handle("/api/tasks/", api.TasksRouterHandler(conn))
 	mux.Handle("/api/logs", api.LogsHandler(conn))
