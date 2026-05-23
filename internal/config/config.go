@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strconv"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Config holds all service settings.
@@ -14,7 +16,17 @@ type Config struct {
 	LogFormat       string // ATC_LOG_FORMAT: "json" or "text"
 }
 
-// Load reads configuration from environment variables, applying defaults.
+// tomlConfig mirrors Config with TOML-friendly keys for file parsing.
+type tomlConfig struct {
+	DBPath          string `toml:"db_path"`
+	Addr            string `toml:"addr"`
+	ExpiryIntervalS int    `toml:"expiry_interval_s"`
+	DrainTimeoutS   int    `toml:"drain_timeout_s"`
+	LogFormat       string `toml:"log_format"`
+}
+
+// Load reads configuration from an optional TOML file, then overlays env vars (env wins).
+// The TOML file path is read from ATC_CONFIG; a missing file is not an error.
 func Load() Config {
 	cfg := Config{
 		DBPath:          "./agent-task-center.db",
@@ -24,6 +36,29 @@ func Load() Config {
 		LogFormat:       "json",
 	}
 
+	// Load optional TOML file first (lowest precedence after defaults).
+	if path := os.Getenv("ATC_CONFIG"); path != "" {
+		var tc tomlConfig
+		if _, err := toml.DecodeFile(path, &tc); err == nil {
+			if tc.DBPath != "" {
+				cfg.DBPath = tc.DBPath
+			}
+			if tc.Addr != "" {
+				cfg.Addr = tc.Addr
+			}
+			if tc.ExpiryIntervalS != 0 {
+				cfg.ExpiryIntervalS = tc.ExpiryIntervalS
+			}
+			if tc.DrainTimeoutS != 0 {
+				cfg.DrainTimeoutS = tc.DrainTimeoutS
+			}
+			if tc.LogFormat == "text" || tc.LogFormat == "json" {
+				cfg.LogFormat = tc.LogFormat
+			}
+		}
+	}
+
+	// Env vars overlay on top (highest precedence).
 	if v := os.Getenv("ATC_DB_PATH"); v != "" {
 		cfg.DBPath = v
 	}
